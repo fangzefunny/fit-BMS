@@ -319,19 +319,19 @@ if __name__ == '__main__':
     np.random.seed(seed)
     sim_data = get_data(rl(nA), nSub=nSub)
 
-    # # fit hierarchical
-    # models = [rl(nA)]
-    # for model in models:
-    #     fit_info = fit_hier(sim_data, model, nStart=nStart, seed=seed)
-    #     with open(f'data/fit_info_{model.name}-hier.pkl', 'wb')as handle:
-    #         pickle.dump(fit_info, handle)
+    # fit hierarchical
+    models = [rl(nA)]
+    for model in models:
+        fit_info = fit_hier(sim_data, model, nStart=nStart, seed=seed)
+        with open(f'data/fit_info_{model.name}-hier.pkl', 'wb')as handle:
+            pickle.dump(fit_info, handle)
 
-    # # fit map 
-    # models = [rl(nA)]
-    # for model in models:
-    #     fit_info = fit_MAP(sim_data, model, nStart=nStart, seed=seed)
-    #     with open(f'data/fit_info_{model.name}-map.pkl', 'wb')as handle:
-    #         pickle.dump(fit_info, handle)
+    # fit map 
+    models = [rl(nA)]
+    for model in models:
+        fit_info = fit_MAP(sim_data, model, nStart=nStart, seed=seed)
+        with open(f'data/fit_info_{model.name}-map.pkl', 'wb')as handle:
+            pickle.dump(fit_info, handle)
 
     show_param()
     
