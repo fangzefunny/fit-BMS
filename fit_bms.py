@@ -35,13 +35,14 @@ sns.set_style("ticks", {'axes.grid': False})
 
 # ------ fit BMS ---- #
 
-def fit_bms(fit_results, tol=1e-4):
+
+def fit_bms(all_sub_info, use_bic=False, tol=1e-4):
     '''Fit group-level Bayesian model seletion
     Nm is the number of model
-
     Args: 
-        fit_results: [Nm, list] a list of model fitting results
-    
+        all_sub_info: [Nm, list] a list of model fitting results
+        use_bic: use bic to approximate lme
+        tol: 
     Outputs:
         BMS result: a dict including 
             -alpha: [1, Nm] posterior of the model probability
@@ -52,7 +53,6 @@ def fit_bms(fit_results, tol=1e-4):
             -bor:   [1] Bayesian Omnibus Risk, the probability
                     of choosing null hypothesis: model frequencies are equal
             -pxp:   [Nm,] protected exceedance probabilities
-
     ----------------------------------------------------------------
     REFERENCES:
     
@@ -64,13 +64,13 @@ def fit_bms(fit_results, tol=1e-4):
     NeuroImage 84:971-85. doi: 10.1016/j.neuroimage.2013.08.065
     -------------------------------------------------------------------
     Based on: https://github.com/sjgershm/mfit
-
     @ ZF
     '''
-    
     ## get log model evidence
-    lme = np.vstack([calc_lme(model_res) 
-                for model_res in fit_results]).T
+    if use_bic:
+        lme = np.vstack([-.5*np.array(fit_info['bic']) for fit_info in all_sub_info]).T
+    else:
+        lme = np.vstack([calc_lme(fit_info) for fit_info in all_sub_info]).T
     
     ## get group-level posterior
     Nm = lme.shape[1]
@@ -117,15 +117,13 @@ def fit_bms(fit_results, tol=1e-4):
 
     return BMS_result
 
-def calc_lme(model_res):
+def calc_lme(fit_info):
     '''Calculate Log Model Evidence
-
     Turn a list of fitting results of different
     model into a matirx lme. Ns means number of subjects, 
     Nm is the number of models.
-
     Args:
-        model_res: [dict,] A dict of model's fitting info
+        fit_info: [dict,] A dict of model's fitting info
             - log_post: opt parameters
             - log_like: log likelihood
             - param: the optimal parameters
@@ -139,26 +137,27 @@ def calc_lme(model_res):
                 
     '''
     lme  = []
-    for s in range(len(model_res['log_post'])):
+    for s in range(len(fit_info['log_post'])):
         # log|-H|
-        h = np.log(np.linalg.det(model_res['H'][s]))
+        h = np.log(np.linalg.det(fit_info['H'][s]))
         # log p(D,θ*|m) + .5(log(d) - log|-H|) 
-        l = model_res['log_post'][s] + \
-            .5*(model_res['n_param']*np.log(2*np.pi)-h)
+        l = fit_info['log_post'][s] + \
+            .5*(fit_info['n_param']*np.log(2*np.pi)-h)
         lme.append(l)
+        
     # use BIC if any Hessians are degenerate 
     ind = np.isnan(lme) | np.isinf(lme)| (np.imag(lme)!=0)
-    if any(ind.reshape([-1])): lme = -.5 * model_res['bic']
+    if any(ind.reshape([-1])): 
+        warnings.warn("Hessians are degenerated, use BIC")
+        lme = -.5 * np.array(fit_info['bic'])
             
     return np.array(lme)
 
 def dirchlet_exceedence(alpha_post, nSample=1e6):
     '''Sampling to calculate exceedence probability
-
     Args:
         alpha: [1,Nm] dirchilet distribution parameters
         nSample: number of samples
-
     Output: 
     '''
     # the number of categories
@@ -177,10 +176,9 @@ def dirchlet_exceedence(alpha_post, nSample=1e6):
 
         # sample from a gamma distribution and normalized
         r = np.vstack([gamma(a).rvs(size=blk[i]) for a in alpha_post]).T
-        r = r / r.sum(1, keepdims=True)
 
         # use the max decision rule and count 
-        xp += np.bincount(np.argmax(r, axis=1))
+        xp += (r == np.amax(r, axis=1, keepdims=True)).sum(axis=0)
 
     return xp / nSample
 
@@ -188,14 +186,12 @@ def dirchlet_exceedence(alpha_post, nSample=1e6):
 
 def calc_BOR(lme, p_m1D, alpha_post, alpha0):
     '''Calculate the Bayesian Omnibus Risk
-
      Args:
         lme: [Nsub, Nm] log model evidence
         p_r1D: [Nsub, Nm] the posterior of each model 
                         assigned to the data
         alpha_post:  [1, Nm] H1: alpha posterior 
         alpha0: [1, Nm] H0: alpha=[1,1,1...]
-
     Outputs:
         bor: the probability of selection the null
                 hypothesis.
@@ -210,10 +206,8 @@ def calc_BOR(lme, p_m1D, alpha_post, alpha0):
 
 def F0(lme):
     '''Calculate the negative free energy of H0
-
     Args:
         lme: [Nsub, Nm] log model evidence
-
     Outputs:
         f0: negative free energy as an approximation
             of log p(D|H0)
@@ -225,14 +219,12 @@ def F0(lme):
     
 def FE(lme, p_m1D, alpha_post, alpha0):
     '''Calculate the negative free energy of H1
-
     Args:
         lme: [Nsub, Nm] log model evidence
         p_m1D: [Nsub, Nm] the posterior of each model 
                         assigned to the data
         alpha_post:  [1, Nm] H1: alpha posterior 
         alpha0: [1, Nm] H0: alpha=[1,1,1...]
-
     Outputs:
         f1: negative free energy as an approximation
             of log p(D|H1)
@@ -240,10 +232,10 @@ def FE(lme, p_m1D, alpha_post, alpha0):
     E_log_r = psi(alpha_post) - psi(alpha_post.sum())
     E_log_rmD = (p_m1D*(lme+E_log_r)).sum() + ((alpha0 -1)*E_log_r).sum()\
                 + gammaln(alpha0.sum()) - (gammaln(alpha0)).sum()
-    Ent_p_r1D = -(p_m1D*np.log(p_m1D + eps_)).sum()
+    Ent_p_m1D = -(p_m1D*np.log(p_m1D + eps_)).sum()
     Ent_alpha  = gammaln(alpha_post).sum() - gammaln(alpha_post.sum()) \
                                         - ((alpha_post-1)*E_log_r).sum()
-    f1 = E_log_rmD + Ent_p_r1D + Ent_alpha
+    f1 = E_log_rmD + Ent_p_m1D + Ent_alpha
     return f1
 
 # ------------------------------#
